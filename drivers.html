@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>PRIMO Driver - Uber Black</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #000000; color: #e5e7eb; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .card-black { background-color: #121212; border: 1px solid #262626; }
+        .input-black { background-color: #1a1a1a; border: 1px solid #333333; color: white; }
+    </style>
+</head>
+<body class="p-4 max-w-md mx-auto space-y-4">
+    <!-- Header -->
+    <header class="card-black p-4 rounded-xl flex justify-between items-center">
+        <div>
+            <h1 class="text-base font-bold text-white">PRIMO Driver</h1>
+            <select id="myDriverId" onchange="cambiarDriver()" class="mt-1 bg-neutral-900 border border-neutral-700 text-xs text-white p-1 rounded">
+                <option value="DRV-1">DRV-1</option>
+                <option value="DRV-2">DRV-2</option>
+                <option value="DRV-3">DRV-3</option>
+                <option value="DRV-4">DRV-4</option>
+                <option value="DRV-5">DRV-5</option>
+            </select>
+        </div>
+        <button onclick="toggleActivo()" id="btnActivo" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-800 text-gray-400 border border-neutral-700">INACTIVO</button>
+    </header>
+
+    <!-- Carreras Asignadas -->
+    <div class="card-black p-5 rounded-xl space-y-3">
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-gray-400">Mis Carreras Asignadas</h2>
+        <div id="misCarreras" class="space-y-3">
+            <p class="text-xs text-gray-500">Buscando carreras...</p>
+        </div>
+    </div>
+
+    <!-- Chat con Base -->
+    <div class="card-black p-4 rounded-xl space-y-2">
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-gray-400">Chat con Base</h2>
+        <div id="chatBoxDriver" class="h-24 overflow-y-auto bg-neutral-900 border border-neutral-800 rounded-lg p-2 space-y-1 text-xs"></div>
+        <div class="flex gap-2">
+            <input type="text" id="chatInputDriver" placeholder="Escribe a Base..." class="flex-1 p-2 rounded-lg input-black text-xs">
+            <button onclick="enviarChatDriver()" class="bg-white text-black font-semibold px-3 py-2 rounded-lg text-xs hover:bg-gray-200">Enviar</button>
+        </div>
+    </div>
+
+    <!-- Walkie-Talkie Driver -->
+    <div class="card-black p-5 rounded-xl flex flex-col items-center justify-center space-y-3">
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-gray-400 self-start">Walkie-Talkie Conductor</h2>
+        <button id="talkBtn" onmousedown="startRecording()" onmouseup="stopRecording()" ontouchstart="startRecording()" ontouchend="stopRecording()" 
+            class="w-24 h-24 rounded-full bg-neutral-900 border-2 border-neutral-700 flex flex-col items-center justify-center shadow-xl active:scale-95 transition cursor-pointer select-none">
+            <span class="text-[10px] font-bold text-red-500 animate-pulse">HABLAR</span>
+            <span class="text-xs font-bold text-white">AUDIO</span>
+        </button>
+        <p id="walkieStatus" class="text-xs text-gray-500">Mantén presionado para hablar</p>
+    </div>
+
+    <audio id="audioPlayer" style="display:none;"></audio>
+
+    <script>
+        const API_URL = 'https://script.google.com/macros/s/AKfycbxFkauzvbW00O0qhSgoRgX14caJzsVq_rxkqb_AdTdGxL_MyF92Zf4H4R5ItL6KuoLUmg/exec'; // <--- Mantén tu URL
+        let activo = false;
+        let mediaRecorder;
+        let audioChunks = [];
+        let ultimoAudioTimestamp = "";
+
+        function cambiarDriver() { syncDriverStatus(); pollData(); }
+
+        async function toggleActivo() {
+            activo = !activo;
+            let btn = document.getElementById('btnActivo');
+            btn.innerText = activo ? "ACTIVO" : "INACTIVO";
+            btn.className = activo ? "px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800" : "px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-800 text-gray-400 border border-neutral-700";
+            syncDriverStatus();
+        }
+
+        async function syncDriverStatus() {
+            let driverId = document.getElementById('myDriverId').value;
+            await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'actualizarDriver', driverId: driverId, estado: activo ? "ACTIVO" : "INACTIVO" }) });
+        }
+
+        async function pollData() {
+            try {
+                let driverId = document.getElementById('myDriverId').value;
+                let res = await fetch(API_URL + '?action=getData');
+                let data = await res.json();
+                
+                let container = document.getElementById('misCarreras');
+                container.innerHTML = '';
+                let misViajes = data.carreras.filter(c => c.conductor === driverId && c.estado !== 'FINALIZADO');
+                
+                if(misViajes.length === 0) {
+                    container.innerHTML = '<p class="text-xs text-gray-500">No hay carreras pendientes.</p>';
+                } else {
+                    misViajes.forEach(c => {
+                        let mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(c.origen)}&destination=${encodeURIComponent(c.destino)}&travelmode=driving`;
+                        
+                        container.innerHTML += `
+                            <div class="bg-neutral-900/60 p-3 rounded-lg border border-neutral-800 space-y-2 text-xs">
+                                <div class="flex justify-between text-gray-400"><span>ID: ${c.id}</span><span class="text-white font-medium uppercase bg-neutral-800 px-2 py-0.5 rounded">${c.estado}</span></div>
+                                <div><strong class="text-gray-300">Origen:</strong> ${c.origen}</div>
+                                <div><strong class="text-gray-300">Destino:</strong> ${c.destino}</div>
+                                <div class="grid grid-cols-2 gap-2 pt-1">
+                                    <a href="${mapsUrl}" target="_blank" class="bg-neutral-800 hover:bg-neutral-700 text-white font-medium py-2 rounded text-center transition flex items-center justify-center gap-1">🗺️ Abrir Maps</a>
+                                    <button onclick="cambiarEstadoCarrera('${c.id}', 'EN CAMINO')" class="bg-zinc-800 hover:bg-zinc-700 text-white font-medium py-2 rounded transition">En Camino</button>
+                                    <button onclick="cambiarEstadoCarrera('${c.id}', 'ESTAMOS AFUERA')" class="bg-zinc-800 hover:bg-zinc-700 text-white font-medium py-2 rounded transition">Afuera</button>
+                                    <button onclick="cambiarEstadoCarrera('${c.id}', 'EMPEZANDO VIAJE')" class="bg-zinc-800 hover:bg-zinc-700 text-white font-medium py-2 rounded transition">Iniciar</button>
+                                </div>
+                                <button onclick="cambiarEstadoCarrera('${c.id}', 'FINALIZADO')" class="w-full bg-white text-black font-semibold py-2 rounded hover:bg-gray-200 transition">Finalizar Carrera</button>
+                            </div>
+                        `;
+                    });
+                }
+
+                let chatRes = await fetch(API_URL + `?action=getChat&driverId=${driverId}`);
+                let msgs = await chatRes.json();
+                let chatBox = document.getElementById('chatBoxDriver');
+                chatBox.innerHTML = '';
+                msgs.forEach(m => {
+                    let align = m.remisor === driverId ? 'text-right text-gray-300' : 'text-left text-white font-semibold';
+                    chatBox.innerHTML += `<div class="${align}"><span class="text-[9px] text-gray-500">[${m.timestamp}]</span> <b>${m.remisor}:</b> ${m.mensaje}</div>`;
+                });
+                chatBox.scrollTop = chatBox.scrollHeight;
+
+                let audioRes = await fetch(API_URL + '?action=getAudio');
+                let audios = await audioRes.json();
+                if(audios.length > 0) {
+                    let latest = audios[0];
+                    if(latest.timestamp !== ultimoAudioTimestamp && latest.remisor !== driverId) {
+                        ultimoAudioTimestamp = latest.timestamp;
+                        let player = document.getElementById('audioPlayer');
+                        player.src = latest.audio;
+                        player.play().catch(e => console.log("Autoplay bloqueado"));
+                        document.getElementById('walkieStatus').innerText = `Audio recibido de ${latest.remisor}`;
+                    }
+                }
+            } catch(e) { console.error("Error polling", e); }
+        }
+
+        async function cambiarEstadoCarrera(id, estado) {
+            await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'actualizarEstadoCarrera', id: id, estado: estado }) });
+            pollData();
+        }
+
+        async function enviarChatDriver() {
+            let driverId = document.getElementById('myDriverId').value;
+            let mensaje = document.getElementById('chatInputDriver').value;
+            if(!mensaje) return;
+            await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'enviarChat', driverId: driverId, remisor: driverId, mensaje: mensaje }) });
+            document.getElementById('chatInputDriver').value = '';
+            pollData();
+        }
+
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+            mediaRecorder.onstop = async () => {
+                let blob = new Blob(audioChunks, { type: 'audio/webm' });
+                let reader = new FileReader();
+                reader.readAsDataURL(blob);
+                reader.onloadend = async function() {
+                    let driverId = document.getElementById('myDriverId').value;
+                    await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'enviarAudio', remisor: driverId, audio: reader.result }) });
+                    document.getElementById('walkieStatus').innerText = "Audio enviado.";
+                };
+            };
+        });
+
+        function startRecording() { audioChunks = []; if(mediaRecorder && mediaRecorder.state === "inactive") { mediaRecorder.start(); document.getElementById('walkieStatus').innerText = "Transmitiendo..."; } }
+        function stopRecording() { if(mediaRecorder && mediaRecorder.state === "recording") { mediaRecorder.stop(); } }
+
+        setInterval(pollData, 4000);
+        pollData();
+    </script>
+</body>
+</html>
