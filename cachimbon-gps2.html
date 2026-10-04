@@ -61,16 +61,19 @@
   </div>
 </div>
 
-<!-- PANTALLA DE LOGIN -->
+<!-- PANTALLA DE LOGIN CORREGIDA -->
 <div id="loginCardContainer">
   <div class="login-box">
     <h3 style="margin-top:0; color:#111827; font-size:20px;">Conéctate a Peluche</h3>
     <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">Ingresa tus datos para empezar a recibir solicitudes cercanas.</p>
+    
     <label style="font-size:12px; font-weight:600; color:#374151;">Nombre completo</label>
-    <input type="text" id="nombreDriver" class="input-field" value="DRV-">
+    <input type="text" id="nombreDriver" class="input-field" placeholder="Ej. Carlos Pérez" value="Conductor 1">
+    
     <label style="font-size:12px; font-weight:600; color:#374151;">Número de teléfono</label>
-    <input type="text" id="telDriver" class="input-field" value="2402815240" readonly>
-    <button class="btn-uber" onclick="iniciarConductor()">Conectarse</button>
+    <input type="text" id="telDriver" class="input-field" placeholder="Ej. 2402815240" value="2402815240">
+    
+    <button class="btn-uber" type="button" onclick="iniciarConductorSeguro()">Conectarse</button>
   </div>
 </div>
 
@@ -160,20 +163,35 @@ window.onload = function() {
   }
 };
 
-function iniciarConductor() {
-  driver.nombre = document.getElementById('nombreDriver').value;
-  driver.telefono = document.getElementById('telDriver').value;
-  if(!driver.nombre) return alert("Por favor ingresa tu nombre");
+function iniciarConductorSeguro() {
+  let inputNombre = document.getElementById('nombreDriver').value.trim();
+  let inputTel = document.getElementById('telDriver').value.trim();
+
+  if(!inputNombre) {
+    alert("Por favor ingresa tu nombre para continuar.");
+    return;
+  }
+
+  driver.nombre = inputNombre;
+  driver.telefono = inputTel;
+
+  // Guardamos en memoria local
   localStorage.setItem('peluche_driver_nombre', driver.nombre);
   localStorage.setItem('peluche_driver_tel', driver.telefono);
+
+  // Ocultamos la tarjeta de login
   document.getElementById('loginCardContainer').style.display = 'none';
+  
   actualizarEstadoUIEnLinea();
   
-  // Reproducir un saludo de voz inicial para activar los permisos de audio del navegador
+  // Intentamos activar voz y mapa
   hablarTexto("Sistema de voz Peluche activado. Buen viaje.");
 
-  setTimeout(() => { map.invalidateSize(); }, 200);
+  setTimeout(() => { 
+    if(map) map.invalidateSize(); 
+  }, 300);
 
+  // Arrancamos el buscador de viajes
   if (intervalViajes) clearInterval(intervalViajes);
   intervalViajes = setInterval(buscarViajesDisponibles, 4000);
 }
