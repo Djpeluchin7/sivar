@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Peluche - Conductor con GPS Integrado</title>
+    <title>Peluche - Conductor con GPS y Voz</title>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <!-- Leaflet Routing Machine CSS -->
@@ -18,6 +18,14 @@
         .login-box { background: white; width: 100%; max-width: 380px; border-radius: 20px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
         .input-field { width: 100%; padding: 14px; margin: 8px 0 16px 0; background: #f9fafb; border: 1px solid var(--border-color); border-radius: 12px; font-size: 15px; box-sizing: border-box; outline: none; }
         .input-field:focus { border-color: var(--accent-blue); }
+        
+        /* BANNER DE NAVEGACIÓN TIPO GPS (SUPERIOR) */
+        #gpsInstructionBanner { position: fixed; top: 70px; left: 15px; right: 15px; background: #111827; color: white; border-radius: 16px; padding: 14px 18px; box-shadow: 0 8px 20px rgba(0,0,0,0.3); z-index: 999; display: none; align-items: center; gap: 14px; border: 1px solid rgba(255,255,255,0.1); }
+        .gps-icon { font-size: 28px; background: rgba(255,255,255,0.1); width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; border-radius: 12px; flex-shrink: 0; }
+        .gps-text-container { display: flex; flex-direction: column; }
+        .gps-distance { font-size: 18px; font-weight: 800; color: #34d399; }
+        .gps-instruction { font-size: 13px; color: #e5e7eb; margin-top: 2px; line-height: 1.3; }
+
         .uber-floating-card { position: fixed; bottom: 20px; left: 15px; right: 15px; background: var(--card-bg); border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 1000; border: 1px solid var(--border-color); box-sizing: border-box; }
         .badge-row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
         .badge-black { background: #111827; color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
@@ -34,16 +42,24 @@
         .btn-uber:active { background: #1d4ed8; }
         .btn-success { background: var(--success); }
         .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; background: #374151; color: #e5e7eb; }
-        /* Ocultar instrucciones de texto de Leaflet Routing Machine */
         .leaflet-routing-container { display: none !important; }
     </style>
 </head>
 <body>
 
 <header>
-  <h1>Peluche <span style="font-weight:300; opacity:0.8;">Driver</span></h1>
+  <h1>Peluche <span style="font-weight:300; opacity:0.8;">Driver GPS</span></h1>
   <div id="driverStatus" class="status-pill">● Desconectado</div>
 </header>
+
+<!-- BANNER DE NAVEGACIÓN FLOTANTE (ESTILO WAZE/GOOGLE MAPS) -->
+<div id="gpsInstructionBanner">
+  <div class="gps-icon" id="gpsBannerIcon">⬆️</div>
+  <div class="gps-text-container">
+    <div class="gps-distance" id="gpsBannerDistance">Calculando...</div>
+    <div class="gps-instruction" id="gpsBannerText">Iniciando sistema de voz...</div>
+  </div>
+</div>
 
 <!-- PANTALLA DE LOGIN -->
 <div id="loginCardContainer">
@@ -83,10 +99,8 @@
     </div>
     <div class="route-timeline" id="activeRouteTimeline"></div>
     
-    <!-- BOTÓN PARA ALTERNAR ENTRE RECOGIDA Y DESTINO -->
     <button class="btn-uber" id="btnCambiarMeta" style="background:#111827; margin-bottom:8px;" onclick="alternarFaseViaje()">🏁 Cambiar a Destino Final</button>
     
-    <!-- BOTONES EXTERNOS DE RESPALDO (GOOGLE MAPS CON GPS ACTUAL) -->
     <div id="driverActionContainer"></div>
     
     <button class="btn-uber btn-success" style="margin-top:10px;" onclick="finalizarViajeActual()">Finalizar Viaje</button>
@@ -105,8 +119,12 @@ let map = null;
 let markerDriver = null;
 let routingControl = null;
 let intervalViajes = null;
-let faseActual = 'recogida'; // 'recogida' o 'destino'
+let faseActual = 'recogida'; 
 let ultimaPosicionConductor = null;
+
+// Variables para el sistema de voz y guía paso a paso
+let instruccionesRuta = [];
+let ultimaInstruccionHablada = "";
 
 window.onload = function() {
   map = L.map('map', {zoomControl: false}).setView([19.4326, -99.1332], 15);
@@ -151,6 +169,9 @@ function iniciarConductor() {
   document.getElementById('loginCardContainer').style.display = 'none';
   actualizarEstadoUIEnLinea();
   
+  // Reproducir un saludo de voz inicial para activar los permisos de audio del navegador
+  hablarTexto("Sistema de voz Peluche activado. Buen viaje.");
+
   setTimeout(() => { map.invalidateSize(); }, 200);
 
   if (intervalViajes) clearInterval(intervalViajes);
@@ -219,6 +240,7 @@ function tomarViaje(idViaje, pasajeroNombre, pasajeroTelefono, origenTexto, dest
           clearInterval(intervalViajes);
           intervalViajes = null;
         }
+        hablarTexto("Nuevo viaje asignado. En camino al punto de recogida.");
         renderizarViajeActivo();
       } else {
         alert("El viaje ya fue tomado por otro conductor.");
@@ -229,6 +251,7 @@ function tomarViaje(idViaje, pasajeroNombre, pasajeroTelefono, origenTexto, dest
 function renderizarViajeActivo() {
   document.getElementById('searchingState').style.display = 'none';
   document.getElementById('activeTripState').style.display = 'block';
+  document.getElementById('gpsInstructionBanner').style.display = 'flex';
 
   let pOrigen = localStorage.getItem('peluche_origen_texto') || 'Punto de recogida';
   let pDestino = localStorage.getItem('peluche_destino_texto') || 'Destino final';
@@ -255,22 +278,17 @@ function actualizarBotonesNavegacionExterna() {
   let latD = parseFloat(localStorage.getItem('peluche_lat_destino'));
   let lngD = parseFloat(localStorage.getItem('peluche_lng_destino'));
 
-  // Obtenemos la posición actual del conductor si existe, de lo contrario usamos el origen por defecto
   let currentLat = ultimaPosicionConductor ? ultimaPosicionConductor.lat : latO;
   let currentLng = ultimaPosicionConductor ? ultimaPosicionConductor.lng : lngO;
 
   let botonesHtml = '';
-  
   if (faseActual === 'recogida' && latO && lngO) {
-    // URL de Google Maps tomando el GPS actual (origin) hacia el punto de recogida (destination)
     const mapsUrlOrigen = `https://www.google.com/maps/dir/?api=1&origin=${currentLat},${currentLng}&destination=${latO},${lngO}&travelmode=driving`;
-    botonesHtml += `<a href="${mapsUrlOrigen}" class="btn-uber" style="background:#111827; margin-bottom:6px;" target="_blank">🧭 Abrir GPS hacia Recogida</a>`;
+    botonesHtml += `<a href="${mapsUrlOrigen}" class="btn-uber" style="background:#111827; margin-bottom:6px;" target="_blank">🧭 Abrir Google Maps (Recogida)</a>`;
   } else if (faseActual === 'destino' && latD && lngD) {
-    // URL de Google Maps tomando el GPS actual (origin) hacia el destino final (destination)
     const mapsUrlDestino = `https://www.google.com/maps/dir/?api=1&origin=${currentLat},${currentLng}&destination=${latD},${lngD}&travelmode=driving`;
-    botonesHtml += `<a href="${mapsUrlDestino}" class="btn-uber" style="background:var(--accent-blue);" target="_blank">🏁 Abrir GPS hacia Destino</a>`;
+    botonesHtml += `<a href="${mapsUrlDestino}" class="btn-uber" style="background:var(--accent-blue);" target="_blank">🏁 Abrir Google Maps (Destino)</a>`;
   }
-
   document.getElementById('driverActionContainer').innerHTML = botonesHtml;
 }
 
@@ -280,11 +298,13 @@ function alternarFaseViaje() {
     document.getElementById('estadoRutaBadge').innerText = "✓ En camino a Destino";
     document.getElementById('btnCambiarMeta').innerText = "🧭 Volver a ver Recogida";
     document.getElementById('btnCambiarMeta').style.background = "#2563eb";
+    hablarTexto("Pasajero a bordo. En camino hacia el destino final.");
   } else {
     faseActual = 'recogida';
     document.getElementById('estadoRutaBadge').innerText = "✓ En camino a Recogida";
     document.getElementById('btnCambiarMeta').innerText = "🏁 Cambiar a Destino Final";
     document.getElementById('btnCambiarMeta').style.background = "#111827";
+    hablarTexto("Regresando la ruta al punto de recogida.");
   }
   actualizarRutaGPSIntegrado();
   actualizarBotonesNavegacionExterna();
@@ -304,10 +324,7 @@ function actualizarRutaGPSIntegrado() {
   let actualLat = ultimaPosicionConductor ? ultimaPosicionConductor.lat : latO;
   let actualLng = ultimaPosicionConductor ? ultimaPosicionConductor.lng : lngO;
 
-  if (!objetivoLat || !objetivoLng || !actualLat || !actualLng) {
-    console.warn("Faltan coordenadas válidas para trazar la ruta.");
-    return;
-  }
+  if (!objetivoLat || !objetivoLng || !actualLat || !actualLng) return;
 
   if (routingControl) {
     map.removeControl(routingControl);
@@ -329,8 +346,71 @@ function actualizarRutaGPSIntegrado() {
         return L.marker(wp.latLng).bindPopup(faseActual === 'recogida' ? 'Punto de Recogida' : 'Destino Final');
       }
     }).addTo(map);
+
+    // Capturamos las instrucciones generadas por Leaflet Routing Machine
+    routingControl.on('routesfound', function(e) {
+      let route = e.routes[0];
+      instruccionesRuta = route.instructions;
+      
+      if (instruccionesRuta && instruccionesRuta.length > 0) {
+        mostrarInstruccionGPS(instruccionesRuta[0]);
+      }
+    });
+
   } catch (e) {
     console.error("Error al inicializar Leaflet Routing Machine:", e);
+  }
+}
+
+function mostrarInstruccionGPS(instruccion) {
+  let textoInstruccion = traducirInstruccionLeaflet(instruccion.text);
+  let distanciaMts = instruccion.distance;
+  
+  let distanciaStr = distanciaMts >= 1000 ? (distanciaMts / 1000).toFixed(1) + " km" : Math.round(distanciaMts) + " m";
+  
+  document.getElementById('gpsBannerDistance').innerText = distanciaStr;
+  document.getElementById('gpsBannerText').innerText = textoInstruccion;
+  document.getElementById('gpsBannerIcon').innerText = obtenerIconoPorTexto(textoInstruccion);
+
+  // Si la instrucción cambió y estamos cerca, la reproducimos en voz alta
+  let fraseCompleta = `En ${distanciaStr}, ${textoInstruccion}`;
+  if (fraseCompleta !== ultimaInstruccionHablada && distanciaMts < 1500) {
+    hablarTexto(fraseCompleta);
+    ultimaInstruccionHablada = fraseCompleta;
+  }
+}
+
+function traducirInstruccionLeaflet(textoOriginal) {
+  let txt = textoOriginal.toLowerCase();
+  if (txt.includes('head')) return 'Sigue recto';
+  if (txt.includes('turn right')) return 'Gira a la derecha';
+  if (txt.includes('turn left')) return 'Gira a la izquierda';
+  if (txt.includes('slight right')) return 'Mantente a la derecha';
+  if (txt.includes('slight left')) return 'Mantente a la izquierda';
+  if (txt.includes('straight')) return 'Continúa recto';
+  if (txt.includes('roundabout')) return 'Entra a la rotonda';
+  if (txt.includes('destination')) return 'Has llegado a tu destino';
+  return textoOriginal;
+}
+
+function obtenerIconoPorTexto(txt) {
+  let t = txt.toLowerCase();
+  if (t.includes('derecha')) return '↪️';
+  if (t.includes('izquierda')) return '↩️';
+  if (t.includes('recto') || t.includes('continúa')) return '⬆️️';
+  if (t.includes('rotonda')) return '🔄';
+  if (t.includes('llegado')) return '🏁';
+  return '📍';
+}
+
+function hablarTexto(mensaje) {
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel(); // Cancela cualquier audio anterior para que no se encime
+    let utterance = new SpeechSynthesisUtterance(mensaje);
+    utterance.lang = 'es-ES';
+    utterance.rate = 1.0; // Velocidad normal
+    utterance.pitch = 1.0;
+    window.speechSynthesis.speak(utterance);
   }
 }
 
@@ -362,32 +442,33 @@ function iniciarGPS() {
       }
 
       if (driver.viajeActualId) {
-        if (routingControl) {
-          let latO = parseFloat(localStorage.getItem('peluche_lat_origen'));
-          let lngO = parseFloat(localStorage.getItem('peluche_lng_origen'));
-          let latD = parseFloat(localStorage.getItem('peluche_lat_destino'));
-          let lngD = parseFloat(localStorage.getItem('peluche_lng_destino'));
-          let objLat = (faseActual === 'recogida') ? latO : latD;
-          let objLng = (faseActual === 'recogida') ? lngO : lngD;
+        let latO = parseFloat(localStorage.getItem('peluche_lat_origen'));
+        let lngO = parseFloat(localStorage.getItem('peluche_lng_origen'));
+        let latD = parseFloat(localStorage.getItem('peluche_lat_destino'));
+        let lngD = parseFloat(localStorage.getItem('peluche_lng_destino'));
+        let objLat = (faseActual === 'recogida') ? latO : latD;
+        let objLng = (faseActual === 'recogida') ? lngO : lngD;
 
-          if(objLat && objLng) {
-            routingControl.setWaypoints([
-              L.latLng(lat, lng),
-              L.latLng(objLat, objLng)
-            ]);
+       if (routingControl && objLat && objLng) {
+  routingControl.setWaypoints([
+    L.latLng(lat, lng),
+    L.latLng(objLat, objLng)
+  ]);
+
+          // Verificamos si pasamos cerca de la instrucción actual de la ruta
+          if (instruccionesRuta && instruccionesRuta.length > 0) {
+            // Simulamos el avance actual tomando el primer paso
+            mostrarInstruccionGPS(instruccionesRuta[0]);
           }
-        } else {
-          actualizarRutaGPSIntegrado();
         }
 
-        // Refrescamos los botones de Google Maps para que siempre usen la última posición en tiempo real del GPS
         actualizarBotonesNavegacionExterna();
 
         fetch(`${WEB_APP_URL}?action=actualizarUbicacionDriver&id=${driver.viajeActualId}&ubicacion=${latLngStr}`)
           .catch(() => console.log("Reintentando conexión GPS..."));
       }
     }, err => {
-      console.warn("Error de geolocalización o permiso denegado: ", err);
+      console.warn("Error de geolocalización: ", err);
     }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 5000 });
   }
 }
@@ -396,6 +477,7 @@ function finalizarViajeActual() {
   fetch(`${WEB_APP_URL}?action=finalizarViaje&id=${driver.viajeActualId}`)
     .catch(() => console.log("Finalizando localmente..."))
     .finally(() => {
+      hablarTexto("Viaje finalizado con éxito.");
       alert("¡Viaje finalizado con éxito!");
       localStorage.removeItem('peluche_viaje_id');
       localStorage.removeItem('peluche_pasajero_nombre');
@@ -412,6 +494,7 @@ function finalizarViajeActual() {
         routingControl = null;
       }
 
+      document.getElementById('gpsInstructionBanner').style.display = 'none';
       document.getElementById('driverActionContainer').innerHTML = "";
       document.getElementById('activeTripState').style.display = 'none';
       document.getElementById('searchingState').style.display = 'block';
