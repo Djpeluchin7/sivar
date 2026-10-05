@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peluche - Conductor Firebase GPS</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet Routing Machine CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    <style>
+        :root { --bg-main: #f3f4f6; --card-bg: #ffffff; --text-main: #111827; --text-muted: #6b7280; --border-color: #e5e7eb; --accent-blue: #2563eb; --success: #10b981; }
+        body { background: var(--bg-main); color: var(--text-main); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        header { background: #111827; color: white; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); z-index: 10; }
+        .header-right { display: flex; align-items: center; gap: 10px; }
+        h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.5px; }
+        #map { width: 100%; flex-grow: 1; z-index: 1; }
+        #loginCardContainer { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
+        .login-box { background: white; width: 100%; max-width: 380px; border-radius: 20px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); }
+        .input-field { width: 100%; padding: 14px; margin: 8px 0 16px 0; background: #f9fafb; border: 1px solid var(--border-color); border-radius: 12px; font-size: 15px; box-sizing: border-box; outline: none; }
+        .input-field:focus { border-color: var(--accent-blue); }        
+        
+        /* BANNER DE NAVEGACIÓN TIPO GPS (SUPERIOR) */
+        #gpsInstructionBanner { position: fixed; top: 70px; left: 15px; right: 15px; background: #111827; color: white; border-radius: 16px; padding: 14px 18px; box-shadow: 0 8px 20px rgba(0,0,0,0.3); z-index: 999; display: none; align-items: center; gap: 14px; border: 1px solid rgba(255,255,255,0.1); }
+        .gps-icon { font-size: 28px; background: rgba(255,255,255,0.1); width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; border-radius: 12px; flex-shrink: 0; }
+        .gps-text-container { display: flex; flex-direction: column; }
+        .gps-distance { font-size: 18px; font-weight: 800; color: #34d399; }
+        .gps-instruction { font-size: 13px; color: #e5e7eb; margin-top: 2px; line-height: 1.3; }
+
+        .uber-floating-card { position: fixed; bottom: 20px; left: 15px; right: 15px; background: var(--card-bg); border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 10; border: 1px solid var(--border-color); box-sizing: border-box; }        
+        .badge-row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }        
+        .badge-black { background: #111827; color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; }        
+        .badge-exclusive { background: #eff6ff; color: #1d4ed8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }        
+        .badge-verified { background: #f0fdf4; color: #15803d; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }        
+        .route-timeline { border-left: 2px dotted #d1d5db; margin-left: 6px; padding-left: 16px; margin-bottom: 16px; }        
+        .route-step { position: relative; margin-bottom: 12px; }        
+        .route-step:last-child { margin-bottom: 0; }        
+        .route-step::before { content: ''; position: absolute; left: -21px; top: 4px; width: 8px; height: 8px; background: #111827; border-radius: 50%; }        
+        .route-step.destination::before { background: #ef4444; }        
+        .time-dist { font-size: 14px; font-weight: 700; color: #111827; }        
+        .address-text { font-size: 13px; color: var(--text-muted); margin-top: 2px; }        
+        .btn-uber { background: var(--accent-blue); color: white; border: none; padding: 14px; border-radius: 14px; font-weight: 700; font-size: 15px; cursor: pointer; width: 100%; text-align: center; display: block; box-sizing: border-box; text-decoration: none; margin-top: 8px; transition: background 0.2s; }        
+        .btn-uber:active { background: #1d4ed8; }        
+        .btn-success { background: var(--success); }        
+        .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; background: #374151; color: #e5e7eb; cursor: pointer; border: none; }        
+        .leaflet-routing-container { display: none !important; }    
+    </style>
+</head>
+<body>
+
+<header>    
+    <h1>Peluche <span style="font-weight:300; opacity:0.8;">Firebase Driver</span></h1>    
+    <div class="header-right">        
+        <button id="btnMuteVoz" class="status-pill" onclick="alternarSilenciamientoVoz()" title="Silenciar / Activar Voz">🔊 Voz Activa</button>        
+        <div id="driverStatus" class="status-pill" style="cursor:default;">● Desconectado</div>    
+    </div>
+</header>
+
+<!-- BANNER DE NAVEGACIÓN FLOTANTE -->
+<div id="gpsInstructionBanner">    
+    <div class="gps-icon" id="gpsBannerIcon">⬆️</div>    
+    <div class="gps-text-container">        
+        <div class="gps-distance" id="gpsBannerDistance">Calculando...</div>        
+        <div class="gps-instruction" id="gpsBannerText">Iniciando sistema de voz...</div>    
+    </div>
+</div>
+
+<!-- PANTALLA DE LOGIN -->
+<div id="loginCardContainer">    
+    <div class="login-box">        
+        <h3 style="margin-top:0; color:#111827; font-size:20px;">Conéctate a Peluche</h3>        
+        <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">Ingresa tus datos para empezar a recibir solicitudes en tiempo real.</p>        
+        <label style="font-size:12px; font-weight:600; color:#374151;">Nombre completo</label>        
+        <input type="text" id="nombreDriver" class="input-field" value="DRV-">        
+        <label style="font-size:12px; font-weight:600; color:#374151;">Número de teléfono</label>        
+        <input type="text" id="telDriver" class="input-field" value="2402815240" readonly>        
+        <button class="btn-uber" onclick="iniciarConductor()">Conectarse</button>    
+    </div>
+</div>
+
+<!-- MAPA LEAFLET -->
+<div id="map"></div>
+
+<!-- TARJETA FLOTANTE -->
+<div class="uber-floating-card" id="floatingCard">    
+    <!-- ESTADO 1: BUSCANDO VIAJES -->    
+    <div id="searchingState">        
+        <div class="badge-row">            
+            <span class="badge-black">Peluche Black</span>            
+            <span class="badge-exclusive">Buscando solicitudes (Tiempo Real)</span>        
+        </div>        
+        <div style="font-size: 16px; font-weight: 700; color: #111827; margin: 8px 0;" id="panelTitle">Esperando pasajeros cercanos...</div>        
+        <div id="viajesContainer" style="max-height: 200px; overflow-y: auto;">            
+            <p style="color:var(--text-muted); font-size:13px; margin:4px 0;">Conectado a Firebase. Las solicitudes aparecerán al instante.</p>        
+        </div>    
+    </div>
+
+    <!-- ESTADO 2: VIAJE ACTIVO -->    
+    <div id="activeTripState" style="display:none;">        
+        <div class="badge-row">            
+            <span class="badge-black">En Curso</span>            
+            <span class="badge-verified" id="estadoRutaBadge">✓ En camino a Recogida</span>        
+        </div>        
+        <div class="route-timeline" id="activeRouteTimeline"></div>                
+        <button class="btn-uber" id="btnCambiarMeta" style="background:#111827; margin-bottom:8px;" onclick="alternarFaseViaje()">🏁 Cambiar a Destino Final</button>                
+        <div id="driverActionContainer"></div>                
+        <button class="btn-uber btn-success" style="margin-top:10px;" onclick="finalizarViajeActual()">Finalizar Viaje</button>    
+    </div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Leaflet Routing Machine JS -->
+<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+<!-- SDK Modular de Firebase (Versión 10 compatible y estable) -->
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, collection, onSnapshot, doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    const firebaseConfig = {    
+        apiKey: "AIzaSyB5w7bXhTbBERcQ0TI6hRwOHA4gwXYV7yo",  
+        authDomain: "peluche-dda78.firebaseapp.com",  
+        databaseURL: "https://peluche-dda78-default-rtdb.firebaseio.com",  
+        projectId: "peluche-dda78",  
+        storageBucket: "peluche-dda78.firebasestorage.app",  
+        messagingSenderId: "673425111065",  
+        appId: "1:673425111065:web:3f4c9e2ca6dfe10cdc1288"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    let driver = { nombre: "", telefono: "", viajeActualId: null };
+    let map = null;
+    let markerDriver = null;
+    let routingControl = null;
+    let unsubscribeViajes = null;
+    let faseActual = 'recogida'; 
+    let ultimaPosicionConductor = null;
+    let ultimoViajeIdsDetectados = "";
+
+    let instruccionesRuta = [];
+    let ultimaInstruccionHablada = "";
+    let vozSilenciada = false;
+
+    function reproducirAlertaCarrera() {    
+        try {      
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();      
+            const osc1 = audioCtx.createOscillator();      
+            const gain1 = audioCtx.createGain();      
+            osc1.type = 'sine';      
+            osc1.frequency.setValueAtTime(587.33, audioCtx.currentTime);      
+            gain1.gain.setValueAtTime(0.3, audioCtx.currentTime);      
+            gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);      
+            osc1.connect(gain1);      
+            gain1.connect(audioCtx.destination);      
+            osc1.start();      
+            osc1.stop(audioCtx.currentTime + 0.2);    
+        } catch (e) { console.log("Audio bloqueado por el navegador"); } 
+    }
+
+    window.onload = function() {    
+        map = L.map('map', {zoomControl: false}).setView([19.4326, -99.1332], 15);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {        
+            maxZoom: 19,        
+            attribution: '&copy; OpenStreetMap contributors'    
+        }).addTo(map);
+
+        setTimeout(() => { map.invalidateSize(); }, 200);
+
+        let savedName = localStorage.getItem('peluche_driver_nombre');    
+        let savedPhone = localStorage.getItem('peluche_driver_tel');    
+        let savedTripId = localStorage.getItem('peluche_viaje_id');
+
+        iniciarGPS();
+
+        if (savedName) {        
+            document.getElementById('nombreDriver').value = savedName;        
+            document.getElementById('telDriver').value = savedPhone || '';        
+            driver.nombre = savedName;        
+            driver.telefono = savedPhone || '';        
+            document.getElementById('loginCardContainer').style.display = 'none';        
+            actualizarEstadoUIEnLinea();
+
+            if (savedTripId) {            
+                driver.viajeActualId = savedTripId;            
+                renderizarViajeActivo();        
+            } else {            
+                escucharViajesDisponiblesFirebase();        
+            }    
+        }
+    };
+
+    window.iniciarConductor = function() {    
+        driver.nombre = document.getElementById('nombreDriver').value;    
+        driver.telefono = document.getElementById('telDriver').value;    
+        
+        if(!driver.nombre || driver.nombre.trim() === "") {
+            return alert("Por favor ingresa tu nombre");    
+        }
+        
+        localStorage.setItem('peluche_driver_nombre', driver.nombre);    
+        localStorage.setItem('peluche_driver_tel', driver.telefono);    
+        
+        document.getElementById('loginCardContainer').style.display = 'none';    
+        actualizarEstadoUIEnLinea();        
+        hablarTexto("Sistema de voz Firebase activado. Buen viaje.");
+
+        setTimeout(() => { map.invalidateSize(); }, 200);
+        escucharViajesDisponiblesFirebase();
+    }
+
+    function actualizarEstadoUIEnLinea() {    
+        let statusEl = document.getElementById('driverStatus');    
+        statusEl.innerText = "● En Línea";    
+        statusEl.style.background = "#064e3b";    
+        statusEl.style.color = "#34d399";
+    }
+
+    // 🟢 ESCUCHA EN TIEMPO REAL ROBUSTA (Filtrado por cliente para evitar errores de índices)
+    function escucharViajesDisponiblesFirebase() {    
+        if(driver.viajeActualId) return;
+
+        if (unsubscribeViajes) unsubscribeViajes();
+
+        const q = collection(db, "viajes");
+        unsubscribeViajes = onSnapshot(q, (snapshot) => {            
+            let container = document.getElementById('viajesContainer');            
+            let viajesDisponibles = [];                
+            
+            snapshot.forEach(docSnap => {                
+                let v = docSnap.data();
+                // Acepta tanto 'BUSCANDO' como 'pendiente' para compatibilidad total
+                let estadoActual = (v.estado || '').toUpperCase();
+                if (estadoActual === 'BUSCANDO' || estadoActual === 'PENDIENTE') {          
+                    viajesDisponibles.push({ id: docSnap.id, ...v });        
+                }            
+            });
+
+            if(viajesDisponibles.length > 0) {   
+                let idsActuales = viajesDisponibles.map(v => v.id).join(',');        
+                if (idsActuales !== ultimoViajeIdsDetectados) {          
+                    reproducirAlertaCarrera();          
+                    ultimoViajeIdsDetectados = idsActuales;        
+                }             
+                
+                container.innerHTML = viajesDisponibles.map(v => `                    
+                    <div style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:14px; padding:12px; margin-top:8px;">                        
+                        <div style="font-weight:700; font-size:15px; color:#111827; margin-bottom:6px;">${v.pasajeroNombre || 'Pasajero'}</div>                        
+                        <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">📍 Recogida: ${v.origenTexto || 'Punto de recogida'}</div>                        
+                        <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">🏁 Destino: ${v.destinoTexto || 'Destino final'}</div>                        
+                        <button class="btn-uber" style="margin-top:0; padding:10px;" onclick='tomarViajeFirebase("${v.id}", "${encodeURIComponent(v.pasajeroNombre || 'Pasajero')}", "${encodeURIComponent(v.pasajeroTelefono || '')}", "${encodeURIComponent(v.origenTexto || '')}", "${encodeURIComponent(v.destinoTexto || '')}", "${v.latOrigen || v.origenLat || 0}", "${v.lngOrigen || v.origenLng || 0}", "${v.latDestino || v.destinoLat || 0}", "${v.lngDestino || v.destinoLng || 0}")'>Aceptar Solicitud</button>                    
+                    </div>                `).join('');            
+            } else {   
+                ultimoViajeIdsDetectados = "";             
+                container.innerHTML = "<p style='color:var(--text-muted); font-size:13px; margin:4px 0;'>Esperando solicitudes cercanas en tiempo real...</p>";            
+            }        
+        }, error => {            
+            console.error("Error escuchando viajes en Firestore: ", error);            
+        });
+    }
+
+    window.tomarViajeFirebase = async function(idViaje, encNombre, encTel, encOrigen, encDestino, latO, lngO, latD, lngD) {    
+        try {      
+            const viajeRef = doc(db, "viajes", idViaje);      
+            const viajeSnap = await getDoc(viajeRef);
+
+            if(!viajeSnap.exists()) {        
+                alert("El viaje ya no existe.");        
+                return;      
+            }
+
+            await updateDoc(viajeRef, {        
+                estado: 'EN_CURSO',        
+                driverNombre: driver.nombre,        
+                driverTelefono: driver.telefono      
+            });
+
+            let pNombre = decodeURIComponent(encNombre);      
+            let pTel = decodeURIComponent(encTel);      
+            let pOrigen = decodeURIComponent(encOrigen);      
+            let pDestino = decodeURIComponent(encDestino);
+
+            localStorage.setItem('peluche_viaje_id', idViaje);        
+            localStorage.setItem('peluche_pasajero_nombre', pNombre);        
+            localStorage.setItem('peluche_pasajero_tel', pTel);        
+            localStorage.setItem('peluche_origen_texto', pOrigen);        
+            localStorage.setItem('peluche_destino_texto', pDestino);        
+            localStorage.setItem('peluche_lat_origen', latO);        
+            localStorage.setItem('peluche_lng_origen', lngO);        
+            localStorage.setItem('peluche_lat_destino', latD);        
+            localStorage.setItem('peluche_lng_destino', lngD);                
+            
+            driver.viajeActualId = idViaje;        
+            faseActual = 'recogida';
+
+            if (unsubscribeViajes) {            
+                unsubscribeViajes();            
+                unsubscribeViajes = null;        
+            }
+
+            hablarTexto("Nuevo viaje asignado. En camino al punto de recogida.");        
+            renderizarViajeActivo();    
+        } catch (err) {        
+            alert("Error al aceptar el viaje.");        
+            console.error(err);    
+        }
+    }
+
+    function renderizarViajeActivo() {    
+        document.getElementById('searchingState').style.display = 'none';    
+        document.getElementById('activeTripState').style.display = 'block';    
+        document.getElementById('gpsInstructionBanner').style.display = 'flex';
+
+        let pOrigen = localStorage.getItem('peluche_origen_texto') || 'Punto de recogida';    
+        let pDestino = localStorage.getItem('peluche_destino_texto') || 'Destino final';
+
+        document.getElementById('activeRouteTimeline').innerHTML = `        
+            <div class="route-step">            
+                <div class="time-dist">Origen</div>            
+                <div class="address-text">${pOrigen}</div>        
+            </div>        
+            <div class="route-step destination">            
+                <div class="time-dist">Destino</div>            
+                <div class="address-text">${pDestino}</div>        
+            </div>    `;
+
+        setTimeout(() => { map.invalidateSize(); }, 200);    
+        actualizarRutaGPSIntegrado();    
+        actualizarBotonesNavegacionExterna();
+    }
+
+    function actualizarBotonesNavegacionExterna() {    
+        let latO = parseFloat(localStorage.getItem('peluche_lat_origen'));    
+        let lngO = parseFloat(localStorage.getItem('peluche_lng_origen'));    
+        let latD = parseFloat(localStorage.getItem('peluche_lat_destino'));    
+        let lngD = parseFloat(localStorage.getItem('peluche_lng_destino'));
+
+        let currentLat = ultimaPosicionConductor ? ultimaPosicionConductor.lat : latO;    
+        let currentLng = ultimaPosicionConductor ? ultimaPosicionConductor.lng : lngO;
+
+        let botonesHtml = '';    
+        if (faseActual === 'recogida' && latO && lngO) {        
+            const mapsUrlOrigen = `https://www.google.com/maps/dir/?api=1&origin=${currentLat},${currentLng}&destination=${latO},${lngO}&travelmode=driving`;        
+            botonesHtml += `<a href="${mapsUrlOrigen}" class="btn-uber" style="background:#111827; margin-bottom:6px;" target="_blank">🧭 Abrir Google Maps (Recogida)</a>`;    
+        } else if (faseActual === 'destino' && latD && lngD) {        
+            const mapsUrlDestino = `https://www.google.com/maps/dir/?api=1&origin=${currentLat},${currentLng}&destination=${latD},${lngD}&travelmode=driving`;        
+            botonesHtml += `<a href="${mapsUrlDestino}" class="btn-uber" style="background:var(--accent-blue);" target="_blank">🏁 Abrir Google Maps (Destino)</a>`;    
+        }    
+        document.getElementById('driverActionContainer').innerHTML = botonesHtml;
+    }
+
+    window.alternarFaseViaje = function() {    
+        if (faseActual === 'recogida') {        
+            faseActual = 'destino';        
+            document.getElementById('estadoRutaBadge').innerText = "✓ En camino a Destino";        
+            document.getElementById('btnCambiarMeta').innerText = "🧭 Volver a ver Recogida";        
+            document.getElementById('btnCambiarMeta').style.background = "#2563eb";        
+            hablarTexto("Pasajero a bordo. En camino hacia el destino final.");    
+        } else {        
+            faseActual = 'recogida';        
+            document.getElementById('estadoRutaBadge').innerText = "✓ En camino a Recogida";        
+            document.getElementById('btnCambiarMeta').innerText = "🏁 Cambiar a Destino Final";        
+            document.getElementById('btnCambiarMeta').style.background = "#111827";        
+            hablarTexto("Regresando la ruta al punto de recogida.");    
+        }    
+        actualizarRutaGPSIntegrado();    
+        actualizarBotonesNavegacionExterna();
+    }
+
+    function actualizarRutaGPSIntegrado() {    
+        if (!driver.viajeActualId) return;
+
+        let latO = parseFloat(localStorage.getItem('peluche_lat_origen'));    
+        let lngO = parseFloat(localStorage.getItem('peluche_lng_origen'));    
+        let latD = parseFloat(localStorage.getItem('peluche_lat_destino'));    
+        let lngD = parseFloat(localStorage.getItem('peluche_lng_destino'));
+
+        let objetivoLat = (faseActual === 'recogida') ? latO : latD;    
+        let objetivoLng = (faseActual === 'recogida') ? lngO : lngD;
+
+        let actualLat = ultimaPosicionConductor ? ultimaPosicionConductor.lat : latO;    
+        let actualLng = ultimaPosicionConductor ? ultimaPosicionConductor.lng : lngO;
+
+        if (!objetivoLat || !objetivoLng || !actualLat || !actualLng) return;
+
+        if (routingControl) {
+            routingControl.setWaypoints([
+                L.latLng(actualLat, actualLng),
+                L.latLng(objetivoLat, objetivoLng)
+            ]);
+        } else {
+            try {
+                routingControl = L.Routing.control({
+                    waypoints: [
+                        L.latLng(actualLat, actualLng),
+                        L.latLng(objetivoLat, objetivoLng)
+                    ],     
+                    routeWhileDragging: false,            
+                    addWaypoints: false,            
+                    draggableWaypoints: false,            
+                    fitSelectedRoutes: true,            
+                    language: 'es',            
+                    createMarker: function(i, wp) {                
+                        if (i === 0) return null;                
+                        return L.marker(wp.latLng).bindPopup(faseActual === 'recogida' ? 'Punto de Recogida' : 'Destino Final');            
+                    }            
+                }).addTo(map);
+
+                routingControl.on('routesfound', function(e) {            
+                    let route = e.routes[0];            
+                    instruccionesRuta = route.instructions;                        
+                    if (instruccionesRuta && instruccionesRuta.length > 0) {                
+                        mostrarInstruccionGPS(instruccionesRuta[0]);            
+                    }            
+                });
+
+            } catch (e) {        
+                console.error("Error al inicializar Leaflet Routing Machine:", e);    
+            }
+        }
+    }
+
+    function mostrarInstruccionGPS(instruccion) {    
+        let textoInstruccion = traducirInstruccionLeaflet(instruccion.text);    
+        let distanciaMts = instruccion.distance;        
+        let distanciaStr = distanciaMts >= 1000 ? (distanciaMts / 1000).toFixed(1) + " km" : Math.round(distanciaMts) + " m";        
+        
+        document.getElementById('gpsBannerDistance').innerText = distanciaStr;    
+        document.getElementById('gpsBannerText').innerText = textoInstruccion;    
+        document.getElementById('gpsBannerIcon').innerText = obtenerIconoPorTexto(textoInstruccion);
+
+        let fraseCompleta = `A 100 metros, ${textoInstruccion}`;    
+        if (fraseCompleta !== ultimaInstruccionHablada && distanciaMts <= 100) {        
+            hablarTexto(fraseCompleta);        
+            ultimaInstruccionHablada = fraseCompleta;    
+        }
+    }
+
+    function traducirInstruccionLeaflet(textoOriginal) {    
+        let txt = textoOriginal.toLowerCase();    
+        if (txt.includes('head')) return 'sigue recto';    
+        if (txt.includes('turn right')) return 'gira a la derecha';    
+        if (txt.includes('turn left')) return 'gira a la izquierda';    
+        if (txt.includes('slight right')) return 'mantente a la derecha';    
+        if (txt.includes('slight left')) return 'mantente a la izquierda';    
+        if (txt.includes('straight')) return 'continúa recto';        
+        
+        if (txt.includes('roundabout') || txt.includes('rotonda')) {        
+            let salidaMatch = txt.match(/take the (\d+)(?:st|nd|rd|th)? exit/i) || txt.match(/salida (\d+)/i);        
+            if (salidaMatch) {            
+                let numSalida = salidaMatch[1];            
+                let ordinalSalida = numSalida === '1' ? 'primera' : numSalida === '2' ? 'segunda' : numSalida === '3' ? 'tercera' : `${numSalida} salida`;            
+                return `entra a la rotonda y toma la ${ordinalSalida} salida`;        
+            }        
+            return 'entra a la rotonda';    
+        }
+
+        if (txt.includes('destination')) return 'has llegado a tu destino';    
+        return textoOriginal;
+    }
+
+    function obtenerIconoPorTexto(txt) {    
+        let t = txt.toLowerCase();    
+        if (t.includes('derecha')) return '↪️';    
+        if (t.includes('izquierda')) return '↩️';    
+        if (t.includes('recto') || t.includes('continúa')) return '⬆';    
+        if (t.includes('rotonda')) return '🔄';    
+        if (t.includes('llegado')) return '🏁';    
+        return '📍';
+    }
+
+    function hablarTexto(mensaje) {    
+        if (vozSilenciada) return;    
+        if ('speechSynthesis' in window) {        
+            window.speechSynthesis.cancel();         
+            let utterance = new SpeechSynthesisUtterance(mensaje);        
+            utterance.lang = 'es-ES';        
+            utterance.rate = 1.0;         
+            utterance.pitch = 1.0;        
+            window.speechSynthesis.speak(utterance);    
+        }
+    }
+
+    window.alternarSilenciamientoVoz = function() {    
+        vozSilenciada = !vozSilenciada;    
+        let btnMute = document.getElementById('btnMuteVoz');    
+        if (vozSilenciada) {        
+            window.speechSynthesis.cancel();        
+            btnMute.innerText = "🔇 Voz Silenciada";        
+            btnMute.style.background = "#7f1d1d";        
+            btnMute.style.color = "#fca5a5";    
+        } else {        
+            btnMute.innerText = "🔊 Voz Activa";        
+            btnMute.style.background = "#374151";        
+            btnMute.style.color = "#e5e7eb";        
+            hablarTexto("Asistente de voz reactivado.");    
+        }
+    }
+
+    function iniciarGPS() {    
+        if (navigator.geolocation) {        
+            navigator.geolocation.watchPosition(async pos => {            
+                let lat = pos.coords.latitude;            
+                let lng = pos.coords.longitude;            
+                ultimaPosicionConductor = { lat, lng };
+
+                if (map) {                
+                    if (!markerDriver) {                    
+                        markerDriver = L.circleMarker([lat, lng], {                        
+                            radius: 10,                         
+                            color: '#ffffff',                         
+                            fillColor: '#2563eb',                         
+                            fillOpacity: 1,                         
+                            weight: 3                    }).addTo(map).bindPopup('Tu ubicación');
+
+                        if (!driver.viajeActualId) {                        
+                            map.setView([lat, lng], 15);                        
+                            setTimeout(() => { map.invalidateSize(); }, 200);                    
+                        }                
+                    } else {                    
+                        markerDriver.setLatLng([lat, lng]);                
+                    }            
+                }
+
+                if (driver.viajeActualId) {                
+                    let latO = parseFloat(localStorage.getItem('peluche_lat_origen'));                
+                    let lngO = parseFloat(localStorage.getItem('peluche_lng_origen'));                
+                    let latD = parseFloat(localStorage.getItem('peluche_lat_destino'));                
+                    let lngD = parseFloat(localStorage.getItem('peluche_lng_destino'));                
+                    let objLat = (faseActual === 'recogida') ? latO : latD;                
+                    let objLng = (faseActual === 'recogida') ? lngO : lngD;
+
+                    if (routingControl && objLat && objLng) {                    
+                        routingControl.setWaypoints([                        
+                            L.latLng(lat, lng),                        
+                            L.latLng(objLat, objLng)                    ]);
+
+                        if (instruccionesRuta && instruccionesRuta.length > 0) {                        
+                            mostrarInstruccionGPS(instruccionesRuta[0]);                    
+                        }                
+                    }
+
+                    actualizarBotonesNavegacionExterna();
+
+                    try {
+                        const viajeRef = doc(db, "viajes", driver.viajeActualId);
+                        await updateDoc(viajeRef, {                    
+                            latDriver: lat.toString(),                    
+                            lngDriver: lng.toString()                
+                        });
+                    } catch(err) { console.log("Actualizando GPS..."); }
+                }        
+            }, err => {            
+                console.warn("Error de geolocalización: ", err);        
+            }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 5000 });    
+        }
+    }
+
+    window.finalizarViajeActual = async function() {    
+        if (!driver.viajeActualId) return;
+
+        try {
+            const viajeRef = doc(db, "viajes", driver.viajeActualId);
+            await updateDoc(viajeRef, {        
+                estado: 'FINALIZADO'    
+            });
+        } catch(e) { console.log("Finalizando..."); }
+
+        hablarTexto("Viaje finalizado con éxito.");        
+        alert("¡Viaje finalizado con éxito!");                
+        
+        localStorage.removeItem('peluche_viaje_id');        
+        localStorage.removeItem('peluche_pasajero_nombre');        
+        localStorage.removeItem('peluche_pasajero_tel');        
+        localStorage.removeItem('peluche_origen_texto');        
+        localStorage.removeItem('peluche_destino_texto');        
+        localStorage.removeItem('peluche_lat_origen');        
+        localStorage.removeItem('peluche_lng_origen');        
+        localStorage.removeItem('peluche_lat_destino');        
+        localStorage.removeItem('peluche_lng_destino');
+
+        if (routingControl) {            
+            map.removeControl(routingControl);            
+            routingControl = null;        
+        }
+
+        document.getElementById('gpsInstructionBanner').style.display = 'none';        
+        document.getElementById('driverActionContainer').innerHTML = "";        
+        document.getElementById('activeTripState').style.display = 'none';        
+        document.getElementById('searchingState').style.display = 'block';        
+        driver.viajeActualId = null;        
+        faseActual = 'recogida';
+
+        escucharViajesDisponiblesFirebase();    
+    }
+</script>
+</body>
+</html>
